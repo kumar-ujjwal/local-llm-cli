@@ -1,0 +1,168 @@
+#!/bin/bash
+
+#  Elegant AI Query Script
+#  Modernized for beautiful terminal output with enhanced visuals
+
+# === Configuration ===
+BACKEND="lmstudio"  # Options: "lmstudio" or "openrouter"
+
+# LM Studio Configuration
+# kujjwal windows: 192.168.0.103
+LM_HOST="192.168.0.103"
+LM_PORT="1234"
+
+# OpenRouter Configuration
+# glm 4.5 free key: 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
+OPENROUTER_API_KEY="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"  # Replace with your actual API key
+OPENROUTER_MODEL="z-ai/glm-4.5-air:free"  # Specify the model from OpenRouter
+
+# ANSI color codes for modern, elegant output
+RED='\033[1;31m'
+GREEN='\033[1;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[1;34m'
+PURPLE='\033[1;35m'
+CYAN='\033[1;36m'
+WHITE='\033[1;37m'
+GRAY='\033[1;90m'
+GOLD='\033[38;5;220m'
+LIME='\033[38;5;118m'
+PEACH='\033[38;5;217m'
+NC='\033[0m' # No Color
+
+# Function to get terminal width
+get_term_width() {
+  tput cols 2>/dev/null || echo 80
+}
+
+# Function to print a modern header
+print_header() {
+  local title="AI Query Engine - Powered by $BACKEND"
+  echo -e "${PURPLE}${title}${NC}\n"
+  echo -e "${WHITE} © @kumarujjwal${NC}\n"
+
+}
+
+# Function to print a modern loading spinner
+spinner() {
+  local pid=$1
+  local delay=0.15
+  local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+  local term_width=$(get_term_width)
+  while kill -0 $pid 2>/dev/null; do
+    local temp=${spinstr#?}
+    printf "${PEACH}%s Processing...${NC}" "$spinstr"
+    local spinstr=$temp${spinstr%"$temp"}
+    sleep $delay
+    printf "\r%${term_width}s\r"
+  done
+  printf "\r%${term_width}s\r"
+}
+
+# Build prompt (handle stdin, piped, or args)
+if [ $# -eq 0 ] && [ -t 0 ]; then
+  echo -e "${CYAN}Enter your prompt (type ':q' on a new line to finish):${NC}"
+  echo -n ">>> "
+  PROMPT=$(while IFS= read -r line; do
+    [ "$line" = ":q" ] && break
+    printf "%s\n" "$line"
+  done | jq -Rs .)
+  echo
+elif [ -p /dev/stdin ]; then
+  PROMPT=$(cat - | jq -Rs .)
+elif [ -t 0 ]; then
+  PROMPT=$(printf "%s" "$*" | jq -Rs .)
+else
+  PROMPT=$(cat | jq -Rs .)
+fi
+
+# Exit if prompt is empty
+[ -z "$PROMPT" ] && echo -e "${RED}✗ Error: No input provided.${NC}\n" && exit 1
+
+# Print header
+print_header
+
+# Function to format output in a modern, elegant style
+format_output() {
+  local content="$1"
+  local width=$(get_term_width)
+  # local title="Response:"
+  
+  # echo -e "${YELLOW}${title}${NC}"
+  if command -v bat >/dev/null 2>&1; then
+    echo "$content" | bat --language=markdown --style=plain --color=always --wrap=auto --terminal-width=$((width - 2)) | sed 's/^/ /'
+  elif command -v glow >/dev/null 2>&1; then
+    echo "$content" | glow --pager=false --width $((width - 2)) | sed 's/^/ /'
+  else
+    echo "$content" | fold -s -w $((width - 2)) | sed 's/^/ /'
+  fi
+  echo
+}
+
+# Process based on selected backend
+if [ "$BACKEND" = "lmstudio" ]; then
+  echo -e "${YELLOW}⠋ Connecting to LM Studio...${NC}"
+  # Get currently loaded model from LM Studio
+  MODEL=$(curl -s "http://${LM_HOST}:${LM_PORT}/v1/models" | jq -r '.data[0].id')
+  
+  if [ -z "$MODEL" ]; then
+    echo -e "${RED}✗ Error: No model loaded in LM Studio.${NC}\n"
+    exit 1
+  fi
+  
+  echo -e "${GREEN}✔ Using model: ${GOLD}$MODEL${NC}\n"
+  
+  # Start spinner in background
+  curl -s "http://${LM_HOST}:${LM_PORT}/v1/chat/completions" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "model": "'"$MODEL"'",
+      "messages": [{"role": "user", "content": '"$PROMPT"'}],
+      "temperature": 0.7
+    }' > /tmp/response.json &
+  
+  SPINNER_PID=$!
+  spinner $SPINNER_PID
+  
+  # Extract content
+  CONTENT=$(cat /tmp/response.json | jq -r '.choices[0].message.content')
+  rm -f /tmp/response.json
+
+  # Format beautifully
+  format_output "$CONTENT"
+
+elif [ "$BACKEND" = "openrouter" ]; then
+  if [ "$OPENROUTER_API_KEY" = "your_openrouter_api_key_here" ]; then
+    echo -e "${RED}✗ Error: Please set your OpenRouter API key.${NC}\n"
+    exit 1
+  fi
+  
+  echo -e "${YELLOW}⠋ Querying OpenRouter...${NC}"
+  echo -e "${GREEN}✔ Using model: ${WHITE}$OPENROUTER_MODEL${NC}\n"
+  
+  # Start spinner in background
+  curl -s "https://openrouter.ai/api/v1/chat/completions" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
+    -d '{
+      "model": "'"$OPENROUTER_MODEL"'",
+      "messages": [{"role": "user", "content": '"$PROMPT"'}],
+      "temperature": 0.7
+    }' > /tmp/response.json &
+  
+  SPINNER_PID=$!
+  spinner $SPINNER_PID
+  
+  # Extract content
+  CONTENT=$(cat /tmp/response.json | jq -r '.choices[0].message.content')
+  rm -f /tmp/response.json
+
+  # Format beautifully
+  format_output "$CONTENT"
+
+else
+  echo -e "${RED}✗ Error: Invalid backend selected. Use 'lmstudio' or 'openrouter'.${NC}\n"
+  exit 1
+fi
+
+# echo -e "${GREEN} Query Complete${NC}\n"
